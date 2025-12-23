@@ -1,0 +1,46 @@
+workspace_root: .
+workspaces:
+  - name: vpc-2
+    kind: terraform
+    dir: terraform/examples/vpc-2
+    tfvars: terraform/examples/vpc-2/vpc.tfvars
+    dependsOn: []
+    taskQueue: terraform-task-queue
+    operations: [init, validate, plan]  # Plan-only mode
+
+  - name: vpc
+    kind: terraform
+    dir: terraform/examples/vpc
+    tfvars: terraform/examples/vpc/vpc.tfvars
+    dependsOn: []
+    taskQueue: terraform-task-queue
+    operations: [init, validate, plan, apply]  # Full apply mode
+
+  - name: subnets
+    kind: terraform
+    dir: terraform/examples/subnets
+    tfvars: terraform/examples/subnets/subnets.tfvars
+    dependsOn:
+      - vpc
+    inputs:
+      - sourceWorkspace: vpc
+        sourceOutput: vpc_id
+        targetVar: vpc_id
+    taskQueue: terraform-task-queue
+    operations: [init, validate, plan, apply]  # Full apply mode
+
+  - name: eks
+    kind: terraform
+    dir: terraform/examples/eks
+    tfvars: terraform/examples/eks/eks.tfvars
+    dependsOn:
+      - vpc
+      - subnets
+    inputs:
+    - sourceWorkspace: vpc
+      sourceOutput: vpc_id
+      targetVar: vpc_id
+    - sourceWorkspace: subnets
+      sourceOutput: subnet_ids
+      targetVar: subnet_ids
+    operations: [init, validate, plan]  # Plan-only mode
