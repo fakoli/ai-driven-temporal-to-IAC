@@ -1,0 +1,9 @@
+# @target: vpc_cidr, cidr_block
+# @severity: error
+# @workspace: vpc
+# @description: VPC CIDR must be valid CIDR notation
+# @remediation: Use format like 10.0.0.0/16 or 172.16.0.0/12
+
+has(vars.vpc_cidr) && vars.vpc_cidr != "" ?
+  isCIDR(vars.vpc_cidr) :
+  (has(vars.cidr_block) && vars.cidr_block != "" ? isCIDR(vars.cidr_block) : true)

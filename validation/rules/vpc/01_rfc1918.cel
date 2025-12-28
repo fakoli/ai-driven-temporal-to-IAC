@@ -1,0 +1,9 @@
+# @target: vpc_cidr, cidr_block
+# @severity: error
+# @workspace: vpc
+# @description: VPC CIDR must use RFC 1918 private address space
+# @remediation: Use one of: 10.0.0.0/8, 172.16.0.0/12, or 192.168.0.0/16
+
+has(vars.vpc_cidr) && vars.vpc_cidr != "" ?
+  isRFC1918(vars.vpc_cidr) :
+  (has(vars.cidr_block) && vars.cidr_block != "" ? isRFC1918(vars.cidr_block) : true)

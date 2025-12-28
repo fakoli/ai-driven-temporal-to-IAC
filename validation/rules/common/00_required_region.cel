@@ -1,0 +1,7 @@
+# @target: region
+# @severity: error
+# @workspace: *
+# @description: AWS region is required for all workspaces
+# @remediation: Set the 'region' variable (e.g., us-east-1, us-west-2)
+
+has(vars.region) && vars.region != ""

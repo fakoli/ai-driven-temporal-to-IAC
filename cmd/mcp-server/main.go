@@ -10,10 +10,11 @@ import (
 	"log"
 	"os"
 
+	"github.com/fakoli/temporal-terraform-orchestrator/utils"
+	"github.com/fakoli/temporal-terraform-orchestrator/validation"
+	"github.com/fakoli/temporal-terraform-orchestrator/workflow"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/fakoli/temporal-terraform-orchestrator/utils"
-	"github.com/fakoli/temporal-terraform-orchestrator/workflow"
 	"go.temporal.io/sdk/client"
 )
 
@@ -51,6 +52,15 @@ func main() {
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return getWorkflowStatusHandler(ctx, c, request)
 	})
+
+	// --- Tool: validate_tfvars ---
+	s.AddTool(mcp.NewTool("validate_tfvars",
+		mcp.WithDescription("Validate Terraform variables against CEL rules before execution. Returns validation status with detailed error messages and remediation suggestions."),
+		mcp.WithString("config_path", mcp.Description("Path to YAML config file"), mcp.Required()),
+		mcp.WithString("workspace_name", mcp.Description("Specific workspace to validate (optional, validates all if not specified)")),
+		mcp.WithString("rules_path", mcp.Description("Custom rules directory path (optional)")),
+		mcp.WithBoolean("fail_on_warning", mcp.Description("Treat warnings as errors (default: false)")),
+	), validateTFVarsHandler)
 
 	// Start server on stdio
 	if err := server.ServeStdio(s); err != nil {
@@ -204,4 +214,137 @@ func getWorkflowStatusHandler(ctx context.Context, c client.Client, request mcp.
 	}
 
 	return mcp.NewToolResultText(resultText), nil
+}
+
+func validateTFVarsHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	configPath := mcp.ParseString(request, "config_path", "infra.yaml")
+	workspaceName := mcp.ParseString(request, "workspace_name", "")
+	rulesPath := mcp.ParseString(request, "rules_path", validation.DefaultRulesPath)
+
+	// Parse fail_on_warning boolean from arguments
+	failOnWarning := false
+	if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+		if val, exists := args["fail_on_warning"]; exists {
+			if boolVal, ok := val.(bool); ok {
+				failOnWarning = boolVal
+			}
+		}
+	}
+
+	// Load config
+	config, err := workflow.LoadConfigFromFile(configPath)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to load config: %v", err)), nil
+	}
+
+	// Validate structure first
+	if err := workflow.ValidateInfrastructureConfig(config); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Invalid config structure: %v", err)), nil
+	}
+
+	// Normalize config
+	config = workflow.NormalizeInfrastructureConfig(config)
+
+	// Initialize validation service
+	svc, err := validation.NewService(rulesPath)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to initialize validation service: %v", err)), nil
+	}
+
+	// Prepare results
+	response := validation.ValidationResponse{
+		Status:     "complete",
+		Workspaces: make(map[string]validation.ValidationResult),
+		Summary: validation.ValidationSummary{
+			TotalWorkspaces: 0,
+		},
+	}
+
+	// Validate workspaces
+	for _, ws := range config.Workspaces {
+		// Skip if specific workspace requested and this isn't it
+		if workspaceName != "" && ws.Name != workspaceName {
+			continue
+		}
+
+		response.Summary.TotalWorkspaces++
+
+		// Load tfvars for this workspace
+		tfvars := make(map[string]interface{})
+		if ws.TFVars != "" {
+			data, err := os.ReadFile(ws.TFVars)
+			if err != nil {
+				// Create error result for this workspace
+				result := validation.NewValidationResult()
+				result.AddError(validation.ValidationIssue{
+					Message:  fmt.Sprintf("Failed to read tfvars: %v", err),
+					Severity: validation.SeverityError,
+				})
+				response.Workspaces[ws.Name] = result
+				response.Summary.FailedWorkspaces++
+				response.Summary.TotalErrors++
+				response.Status = "incomplete"
+				continue
+			}
+			if err := json.Unmarshal(data, &tfvars); err != nil {
+				result := validation.NewValidationResult()
+				result.AddError(validation.ValidationIssue{
+					Message:  fmt.Sprintf("Failed to parse tfvars JSON: %v", err),
+					Severity: validation.SeverityError,
+				})
+				response.Workspaces[ws.Name] = result
+				response.Summary.FailedWorkspaces++
+				response.Summary.TotalErrors++
+				response.Status = "incomplete"
+				continue
+			}
+		}
+
+		// Merge extra vars
+		for k, v := range ws.ExtraVars {
+			tfvars[k] = v
+		}
+
+		// Create workspace context
+		wsCtx := validation.WorkspaceContext{
+			Name: ws.Name,
+			Kind: ws.Kind,
+			Dir:  ws.Dir,
+		}
+		if wsCtx.Kind == "" {
+			wsCtx.Kind = "terraform"
+		}
+
+		// Validate
+		result := svc.ValidateTFVars(tfvars, wsCtx)
+		response.Workspaces[ws.Name] = result
+
+		// Update summary
+		if result.Valid {
+			if failOnWarning && len(result.Warnings) > 0 {
+				response.Summary.FailedWorkspaces++
+				response.Status = "incomplete"
+			} else {
+				response.Summary.ValidWorkspaces++
+			}
+		} else {
+			response.Summary.FailedWorkspaces++
+			response.Status = "incomplete"
+		}
+		response.Summary.TotalErrors += len(result.Errors)
+		response.Summary.TotalWarnings += len(result.Warnings)
+	}
+
+	// Format response
+	resJSON, err := json.MarshalIndent(response, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal response: %v", err)), nil
+	}
+
+	// Return as error if validation failed
+	if response.Status == "incomplete" {
+		return mcp.NewToolResultError(string(resJSON)), nil
+	}
+
+	return mcp.NewToolResultText(string(resJSON)), nil
 }

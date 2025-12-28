@@ -1,0 +1,9 @@
+# @target: region
+# @severity: error
+# @workspace: *
+# @description: AWS region must be a valid region code
+# @remediation: Use a valid AWS region (e.g., us-east-1, eu-west-1, ap-southeast-1)
+
+has(vars.region) ?
+  isValidAWSRegion(vars.region) :
+  true
