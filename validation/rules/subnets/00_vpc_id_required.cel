@@ -1,0 +1,7 @@
+# @target: vpc_id
+# @severity: error
+# @workspace: subnets
+# @description: VPC ID is required to create subnets
+# @remediation: Ensure vpc_id is passed from the VPC workspace via input mapping
+
+has(vars.vpc_id) && vars.vpc_id != "" && vars.vpc_id != "null"

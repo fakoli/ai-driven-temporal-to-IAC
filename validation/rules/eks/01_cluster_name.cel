@@ -1,0 +1,9 @@
+# @target: cluster_name, name
+# @severity: error
+# @workspace: eks
+# @description: EKS cluster name must follow naming conventions (lowercase, alphanumeric, hyphens)
+# @remediation: Use lowercase letters, numbers, and hyphens. Max 100 chars. Example: my-prod-cluster
+
+has(vars.cluster_name) && vars.cluster_name != "" ?
+  isValidClusterName(vars.cluster_name) :
+  (has(vars.name) && vars.name != "" ? isValidClusterName(vars.name) : true)

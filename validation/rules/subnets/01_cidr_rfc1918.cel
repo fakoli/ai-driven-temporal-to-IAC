@@ -1,0 +1,9 @@
+# @target: private_subnet_cidrs, public_subnet_cidrs
+# @severity: error
+# @workspace: subnets
+# @description: All subnet CIDRs must use RFC 1918 private address space
+# @remediation: Use subnets within 10.0.0.0/8, 172.16.0.0/12, or 192.168.0.0/16
+
+has(vars.private_subnet_cidrs) && size(vars.private_subnet_cidrs) > 0 ?
+  allRFC1918(vars.private_subnet_cidrs) :
+  true

@@ -1,0 +1,8 @@
+# @target: vpc_id, subnet_ids
+# @severity: error
+# @workspace: eks
+# @description: EKS requires VPC ID and subnet IDs from dependent workspaces
+# @remediation: Ensure vpc_id and subnet_ids are passed via input mappings from vpc and subnets workspaces
+
+has(vars.vpc_id) && vars.vpc_id != "" &&
+has(vars.subnet_ids) && size(vars.subnet_ids) >= 2
