@@ -303,6 +303,11 @@ func ensurePlanFile(path string) error {
 	if err == nil {
 		return nil
 	}
+	// Only create the file if it doesn't exist; return error for other stat failures
+	// (e.g., permission denied, path is a directory)
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to stat plan file %s: %v", path, err)
+	}
 	if err := os.WriteFile(path, []byte{}, 0o600); err != nil {
 		return fmt.Errorf("failed to write plan file %s: %v", path, err)
 	}
